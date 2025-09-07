@@ -6,61 +6,114 @@ import random
 import pygame
 import time
 
+from carla_client.vehicle_manager import VehicleManager
+
 class CarlaGame(Node):
     def __init__(self):
         super().__init__('carla_game')
 
+        # Get parameters
+        self.town = self.declare_parameter("town", "Town10HD_Opt").value
+        self.num_vehicles = self.declare_parameter("num_vehicles", 50).value
+        self.respawn = self.declare_parameter("respawn", 50).value
+        self.carla_auto_pilot = self.declare_parameter("carla_auto_pilot", True).value
+        self.predict_lane = self.declare_parameter("predict_lane", False).value
+        self.predict_object = self.declare_parameter("predict_object", False).value
+
+        self.weather = carla.WeatherParameters.ClearNoon
+        self.fps = 10
+        self.image_width = 1280
+        self.image_height = 720
+        self.fov = 90
+
+        self.display = pygame.display.set_mode((self.image_width, self.image_height), pygame.HWSURFACE | pygame.DOUBLEBUF)
+        self.pygame_clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont('Arial', 36) 
+
+        # Connect client
         self.client = carla.Client('localhost', 2000)
         self.client.set_timeout(10.0)
-        self.world = self.client.load_world('Town10HD_Opt')
+        self.world = self.client.load_world(self.town)
+        self.world.set_weather(self.weather)
+        
+        # Set synchronous mode
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 1.0 / 20
+        settings.fixed_delta_seconds = 1.0 / 10
         self.world.apply_settings(settings)
-        # self.map = self.world.get_map()
-        # self.world.set_weather(cfg.weather)
 
+        self.map = self.world.get_map()
+
+        # Vehicle manager
         self.tm = self.client.get_trafficmanager()
         self.tm.set_synchronous_mode(True)
+        self.vehicle_manager = VehicleManager(self.world, self.tm, self.fps, self.respawn, self.num_vehicles)
 
-        self.spawn_ego_vehicle()
-        self.attach_camera()
+        # Ego vehicle setup
+        self.ego_vehicle = self.vehicle_manager.spawn_ego_vehicle(self.carla_auto_pilot)
 
-        self.get_logger().info('Ego vehicle with camera spawned in synchronous mode.')
-
-
-    def spawn_ego_vehicle(self):
         blueprint_library = self.world.get_blueprint_library()
-        bp_vehicle = blueprint_library.find('vehicle.ford.mustang')
-        bp_vehicle.set_attribute('role_name', 'ego_vehicle')
+        self.sensors = []
 
-        spawn_points = self.world.get_map().get_spawn_points()
-        spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
-        self.ego_vehicle = self.world.spawn_actor(bp_vehicle, spawn_point)
-        self.ego_vehicle.set_autopilot(True)
-        self.get_logger().info(f'Ego vehicle spawned: {self.ego_vehicle.id}')
-
-    def attach_camera(self):
-        blueprint_library = self.world.get_blueprint_library()
         # Spawn rgb-cam and attach to vehicle
         bp_camera_rgb = blueprint_library.find('sensor.camera.rgb')
-        bp_camera_rgb.set_attribute('image_size_x', f'1280')
-        bp_camera_rgb.set_attribute('image_size_y', f'720')
-        bp_camera_rgb.set_attribute('fov', f'90')
+        bp_camera_rgb.set_attribute('image_size_x', f'{self.image_width}')
+        bp_camera_rgb.set_attribute('image_size_y', f'{self.image_height}')
+        bp_camera_rgb.set_attribute('fov', f'{self.fov}')
         self.camera_spawnpoint = carla.Transform(carla.Location(x=1.0, z=2.0), carla.Rotation(pitch=-18.5)) # camera 5
         self.camera_rgb = self.world.spawn_actor(bp_camera_rgb, self.camera_spawnpoint, attach_to=self.ego_vehicle)
+        self.sensors.append(self.camera_rgb)
+
+        if not self.predict_lane:
+            # Spawn semseg-cam and attach to vehicle
+            bp_camera_semseg = blueprint_library.find('sensor.camera.semantic_segmentation')
+            bp_camera_semseg.set_attribute('image_size_x', f'{self.image_width}')
+            bp_camera_semseg.set_attribute('image_size_y', f'{self.image_height}')
+            bp_camera_semseg.set_attribute('fov', f'{self.fov}')
+            self.camera_semseg = self.world.spawn_actor(bp_camera_semseg, self.camera_spawnpoint, attach_to=self.ego_vehicle)
+            self.sensors.append(self.camera_semseg)
+        else:
+            self.camera_semseg = None
+
+        # Spawn depth-cam and attach to vehicle
+        bp_camera_depth = blueprint_library.find('sensor.camera.depth')
+        bp_camera_depth.set_attribute('image_size_x', f'{self.image_width}')
+        bp_camera_depth.set_attribute('image_size_y', f'{self.image_height}')
+        bp_camera_depth.set_attribute('fov', f'{self.fov}')
+        self.camera_depth = self.world.spawn_actor(bp_camera_depth, self.camera_spawnpoint, attach_to=self.ego_vehicle)
+        self.sensors.append(self.camera_depth)
+
+        # Spawn lidar and attach to vehicle
+        bp_lidar = blueprint_library.find("sensor.lidar.ray_cast")
+        bp_lidar.set_attribute("range", "120") # 120 meter range for cars and foliage
+        bp_lidar.set_attribute("rotation_frequency", "10")
+        bp_lidar.set_attribute("channels", "64") # vertical resolution of the laser scanner is 64
+        bp_lidar.set_attribute("points_per_second", "1300000")
+        bp_lidar.set_attribute("upper_fov", "2.0") # +2 up to -24.8 down
+        bp_lidar.set_attribute("lower_fov", "-24.8")
+        self.lidar_spawnpoint = carla.Transform(carla.Location(x=0, y=0, z=1.73))
+        self.lidar = self.world.spawn_actor(bp_lidar, self.lidar_spawnpoint, attach_to=self.ego_vehicle)
+        self.sensors.append(self.lidar)
+
+        # Spawn other vehicles
+        self.vehicle_manager.spawn_vehicles()
+
+        self.tick_counter = 0
+
+        self.RGB_colors = [(0, 255, 0), (255, 0, 0), (255, 255, 0), (0, 0, 255)]
+        self.BGR_colors = [(0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 0, 0)]
 
     def run(self):
         self.world.tick()  # Advance one simulation step
-        self.get_logger().info('World ticked.')
+        self.get_logger().info('Tick')
+    
 
     def destroy(self):
         self.get_logger().info('Cleaning up...')
-        if self.camera_rgb:
-            self.camera_rgb.stop()
-            self.camera_rgb.destroy()
-        if self.ego_vehicle:
-            self.ego_vehicle.destroy()
+        self.vehicle_manager.destroy()
+        for sensor in self.sensors:
+            sensor.destroy()
+        self.get_logger().info('Sensors destroyed')
 
         settings = self.world.get_settings()
         settings.synchronous_mode = False
@@ -70,6 +123,7 @@ class CarlaGame(Node):
 
 def main():
     rclpy.init()
+    pygame.init()
     node = CarlaGame()
 
     try:
@@ -81,7 +135,7 @@ def main():
             node.run()
 
             # Optional sleep to avoid maxing CPU
-            time.sleep(3)
+            # time.sleep(0.01)
 
     except KeyboardInterrupt:
         node.get_logger().info('Shutting down...')
@@ -90,6 +144,8 @@ def main():
         node.destroy()
         node.destroy_node()
         rclpy.shutdown()
+        pygame.quit()
+
 
 if __name__ == '__main__':
     main()
