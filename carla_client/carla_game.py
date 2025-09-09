@@ -5,8 +5,13 @@ import carla
 import random
 import pygame
 import time
+import numpy as np
+import cv2
+
+from sensor_msgs.msg import Image
 
 from carla_client.vehicle_manager import VehicleManager
+
 
 class CarlaGame(Node):
     def __init__(self):
@@ -26,12 +31,13 @@ class CarlaGame(Node):
         self.image_height = 720
         self.fov = 90
 
+        # Set up pygame
         self.display = pygame.display.set_mode((self.image_width, self.image_height), pygame.HWSURFACE | pygame.DOUBLEBUF)
         self.pygame_clock = pygame.time.Clock()
         self.font = pygame.font.SysFont('Arial', 36) 
 
         # Connect client
-        self.client = carla.Client('localhost', 2000)
+        self.client = carla.Client('172.25.160.1', 2000)
         self.client.set_timeout(10.0)
         self.world = self.client.load_world(self.town)
         self.world.set_weather(self.weather)
@@ -102,6 +108,21 @@ class CarlaGame(Node):
 
         self.RGB_colors = [(0, 255, 0), (255, 0, 0), (255, 255, 0), (0, 0, 255)]
         self.BGR_colors = [(0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 0, 0)]
+
+
+        # Subscribers
+        self.subscription = self.create_subscription(Image, '/carla/hero/front/image', self.camera_rgb_callback, 10)
+
+
+    def camera_rgb_callback(self, image):
+        print("image")
+        array = np.frombuffer(image.data, dtype=np.dtype("uint8"))
+        array = np.reshape(array, (image.height, image.width, 4)) # BGRA
+        array = array[:, :, :3] # BGR
+        array = array[:, :, ::-1] # RGB, (H, W, C)
+        image_surface = pygame.surfarray.make_surface(array.swapaxes(0, 1)) # (W, H, C)
+        self.display.blit(image_surface, (0, 0))
+
 
     def run(self):
         self.world.tick()  # Advance one simulation step
