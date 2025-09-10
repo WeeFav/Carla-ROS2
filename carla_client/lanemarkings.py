@@ -2,18 +2,13 @@
 import rclpy
 from rclpy.node import Node
 import carla
-import random
-import pygame
-import time
+import math
 import numpy as np
-import cv2
-
-from sensor_msgs.msg import Image
-
-from carla_client.vehicle_manager import VehicleManager
+from collections import deque
+import config as cfg
 
 
-class CarlaGame(Node):
+class LaneMarkings(Node):
     def __init__(self):
         super().__init__('carla_game')
 
