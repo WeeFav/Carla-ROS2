@@ -11,13 +11,14 @@ import cv2
 from sensor_msgs.msg import Image
 
 from carla_client.vehicle_manager import VehicleManager
-
+from carla_client.lanemarkings import LaneMarkings
 
 class CarlaGame(Node):
     def __init__(self):
         super().__init__('carla_game')
 
         # Get parameters
+        self.host = self.declare_parameter("host", "192.168.0.196").value
         self.town = self.declare_parameter("town", "Town10HD_Opt").value
         self.num_vehicles = self.declare_parameter("num_vehicles", 50).value
         self.respawn = self.declare_parameter("respawn", 50).value
@@ -25,6 +26,7 @@ class CarlaGame(Node):
         self.predict_lane = self.declare_parameter("predict_lane", False).value
         self.predict_object = self.declare_parameter("predict_object", False).value
 
+        # Fixed parameters
         self.weather = carla.WeatherParameters.ClearNoon
         self.fps = 10
         self.image_width = 1280
@@ -37,18 +39,17 @@ class CarlaGame(Node):
         self.font = pygame.font.SysFont('Arial', 36) 
 
         # Connect client
-        self.client = carla.Client('192.168.0.196', 2000)
+        self.client = carla.Client(self.host, 2000)
         self.client.set_timeout(10.0)
         self.world = self.client.load_world(self.town)
         self.world.set_weather(self.weather)
+        self.map = self.world.get_map()
         
         # Set synchronous mode
         settings = self.world.get_settings()
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = 1.0 / 10
         self.world.apply_settings(settings)
-
-        self.map = self.world.get_map()
 
         # Vehicle manager
         self.tm = self.client.get_trafficmanager()
@@ -111,6 +112,13 @@ class CarlaGame(Node):
 
         self.RGB_colors = [(0, 255, 0), (255, 0, 0), (255, 255, 0), (0, 0, 255)]
         self.BGR_colors = [(0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 0, 0)]
+
+
+        if self.predict_lane:
+            # self.lanedet = LaneDet()
+            pass
+        else:
+            self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov)
 
 
         # Subscribers

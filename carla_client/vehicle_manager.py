@@ -24,8 +24,6 @@ class VehicleManager():
         self.ego_vehicle = self.world.spawn_actor(bp_ego_vehicle, random.choice(self.spawn_points))
         self.ego_vehicle.set_autopilot(autopilot, self.tm.get_port())
         self.tm.update_vehicle_lights(self.ego_vehicle, True)
-        print(f'Ego vehicle spawned: {self.ego_vehicle.id}')
-
         return self.ego_vehicle
     
 
