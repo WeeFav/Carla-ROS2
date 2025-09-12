@@ -11,27 +11,36 @@ class LaneMarkings():
     """
     Helper class to detect and draw lanemarkings in carla.
     """
-    def __init__(self, world, image_width, image_height, fov):
+    def __init__(self, world, image_width, image_height, fov, number_of_lanepoints, meters_per_frame):
         # Get parameters
         self.world = world
+        self.image_width = image_width
+        self.image_height = image_height
+        self.fov = fov
 
         # Fixed parameters
-        number_of_lanepoints = 80
+        self.number_of_lanepoints = number_of_lanepoints
+        self.meters_per_frame = meters_per_frame
 
         # Intrinsic camera matrix needed to convert 3D-world coordinates to 2D-imagepoints
-        self.f = image_width / (2 * math.tan(fov * math.pi / 360))
-        self.c_x = image_width / 2
-        self.c_y = image_height / 2
+        self.f = self.image_width / (2 * math.tan(self.fov * math.pi / 360))
+        self.c_x = self.image_width / 2
+        self.c_y = self.image_height / 2
         
         self.cameraMatrix  = np.float32([[self.f, 0, self.c_x],
                                          [0, self.f, self.c_y],
                                          [0, 0, 1]])
         
+        self.h_samples = []
+        row_anchor_start = 160
+        for y in range(row_anchor_start, self.image_height, 10):
+            self.h_samples.append(y)
+
         self.lanes = [
-            deque(maxlen=number_of_lanepoints), 
-            deque(maxlen=number_of_lanepoints), 
-            deque(maxlen=number_of_lanepoints), 
-            deque(maxlen=number_of_lanepoints)
+            deque(maxlen=self.number_of_lanepoints), 
+            deque(maxlen=self.number_of_lanepoints), 
+            deque(maxlen=self.number_of_lanepoints), 
+            deque(maxlen=self.number_of_lanepoints)
         ]
         
     
@@ -78,13 +87,7 @@ class LaneMarkings():
         else:
             outer_right_lanemarking = None
         self.lanes[3].append(outer_right_lanemarking)
-        
-        if cfg.draw3DLanes:
-            self.draw_points(self.client, left_lanemarking)
-            self.draw_points(self.client, right_lanemarking) 
-            self.draw_points(self.client, outer_left_lanemarking)
-            self.draw_points(self.client, outer_right_lanemarking)
-        
+                
         return self.lanes
 
 
@@ -114,7 +117,7 @@ class LaneMarkings():
             distance = math.sqrt(math.pow(lanepoint.x-last_lanepoint.x ,2)+math.pow(lanepoint.y-last_lanepoint.y ,2)+math.pow(lanepoint.z-last_lanepoint.z ,2))
         
             # Check of there's a hole in the list
-            if distance > cfg.meters_per_frame * 3: # if distance is too large, there is a gap
+            if distance > self.meters_per_frame * 3: # if distance is too large, there is a gap
                 flat_lane_list.append(flat_lane_list_a.copy())
                 flat_lane_list_a = []
                 last_lanepoint = lanepoint
@@ -153,8 +156,8 @@ class LaneMarkings():
                 # visualize everything on a screen, the points that are out of the screen
                 # must be discarted, the same with points behind the camera projection plane.
                 points_2d = points_2d.T
-                points_in_canvas_mask = (points_2d[:, 0] > 0.0) & (points_2d[:, 0] < cfg.image_width) & \
-                                        (points_2d[:, 1] > 0.0) & (points_2d[:, 1] < cfg.image_height) & \
+                points_in_canvas_mask = (points_2d[:, 0] > 0.0) & (points_2d[:, 0] < self.image_width) & \
+                                        (points_2d[:, 1] > 0.0) & (points_2d[:, 1] < self.image_height) & \
                                         (points_2d[:, 2] > 0.0)
                 
                 points_2d = points_2d[points_in_canvas_mask]
@@ -221,31 +224,31 @@ class LaneMarkings():
                     continue
                 if last_point[0]==-1:
                     gap = True
-                    last_point=[0.5* cfg.image_width, cfg.image_height-1]
-                for y_value in reversed(cfg.h_samples):
+                    last_point=[0.5* self.image_width, self.image_height-1]
+                for y_value in reversed(self.h_samples):
                     if gap and (last_point[1] >= y_value and xy_val[1] < y_value):
                         x_coord.append(-2)
-                    elif (last_point == lane_list[0] and last_point[1] < y_value) and last_point[1] < cfg.image_height - 0.4 * cfg.image_height :
+                    elif (last_point == lane_list[0] and last_point[1] < y_value) and last_point[1] < self.image_height - 0.4 * self.image_height :
                         x_coord.append(-2)
-                    elif (last_point[1] >= y_value and xy_val[1] < y_value) or (last_point == lane_list[0] and last_point[1] < y_value) and last_point[1] >= cfg.image_height - 0.4 * cfg.image_height:
+                    elif (last_point[1] >= y_value and xy_val[1] < y_value) or (last_point == lane_list[0] and last_point[1] < y_value) and last_point[1] >= self.image_height - 0.4 * self.image_height:
                         if last_point[1]-xy_val[1] == 0:
                             intersection = last_point[1]
                         else:
                             intersection = xy_val[0] + ((y_value-xy_val[1])*(last_point[0]-xy_val[0]))/(last_point[1]-xy_val[1])
-                        if intersection >= cfg.image_width or intersection < 0:
+                        if intersection >= self.image_width or intersection < 0:
                             x_coord.append(-2)
                         else:
                             x_coord.append(int(intersection))
                 gap = False
                 last_point = xy_val
 
-            while len(x_coord) < len(cfg.h_samples):
+            while len(x_coord) < len(self.h_samples):
                 x_coord.append(-2)
-            return list(zip(reversed(x_coord), cfg.h_samples))
+            return list(zip(reversed(x_coord), self.h_samples))
         else:
-            for i in cfg.h_samples:
+            for i in self.h_samples:
                 x_coord.append(-2)
-            return list(zip(x_coord, cfg.h_samples))
+            return list(zip(x_coord, self.h_samples))
 
 
     def filter2DLanepoints(self, lane_list, image):

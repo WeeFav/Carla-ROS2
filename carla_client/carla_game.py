@@ -32,6 +32,8 @@ class CarlaGame(Node):
         self.image_width = 1280
         self.image_height = 720
         self.fov = 90
+        self.number_of_lanepoints = 80
+        self.meters_per_frame = 1.0
 
         # Set up pygame
         self.display = pygame.display.set_mode((self.image_width, self.image_height), pygame.HWSURFACE | pygame.DOUBLEBUF)
@@ -122,22 +124,48 @@ class CarlaGame(Node):
 
 
         # Subscribers
-        self.subscription = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
+        self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
+        self.camera_semseg_sub = self.create_subscription(Image, '/carla/hero/semseg/image', self.camera_semseg_callback, 10)
 
 
-    def camera_rgb_callback(self, image):
+    def reshape_image(self, image):
         array = np.frombuffer(image.data, dtype=np.dtype("uint8"))
         array = np.reshape(array, (image.height, image.width, 4)) # BGRA
         array = array[:, :, :3] # BGR
         array = array[:, :, ::-1] # RGB, (H, W, C)
+        return array # (H, W, C)
+    
+    
+    def camera_rgb_callback(self, image):
+        self.image_rgb = self.reshape_image(image)
+
+
+    def camera_semseg_callback(self, image):
+        self.image_semseg = self.reshape_image(image)
+
+
+    def run(self):
+        ## Get current waypoints ### 
+        waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
+        waypoint_list = []
+        for i in range(0, self.number_of_lanepoints):
+            waypoint_list.append(waypoint.next(i + self.meters_per_frame)[0])
+
+        ### Predict lanepoints for all lanes ###
+        if self.predict_lane:
+            # img = Image.fromarray(image_rgb, mode="RGB") 
+            # lanes_list_processed = self.lanedet.predict(img)
+            pass
+        else:
+            lanes_list, x_lanes_list = self.lanemarkings.detect_lanemarkings(waypoint_list, self.image_semseg, self.camera_rgb)
+            lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
+
+
+    def render(self):
         image_surface = pygame.surfarray.make_surface(array.swapaxes(0, 1)) # (W, H, C)
         self.display.blit(image_surface, (0, 0))
         pygame.display.flip()
 
-
-    def run(self):
-        self.world.tick()  # Advance one simulation step
-    
 
     def destroy(self):
         self.get_logger().info('Cleaning up...')
@@ -166,12 +194,12 @@ def main():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     raise KeyboardInterrupt
-                
+
+            ### Run simulation ###
+            node.world.tick()
+            rclpy.spin_once(node, timeout_sec=None) # waits forever for something to happen
             node.run()
 
-            rclpy.spin_once(node)
-
-            time.sleep(0.001)
 
     except KeyboardInterrupt:
         node.get_logger().info('Shutting down...')
