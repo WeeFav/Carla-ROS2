@@ -20,6 +20,10 @@ def generate_launch_description():
     carla_auto_pilot = DeclareLaunchArgument('carla_auto_pilot', default_value='True')
     predict_lane = DeclareLaunchArgument('predict_lane', default_value='False')
     predict_object = DeclareLaunchArgument('predict_object', default_value='False')
+    compute_lanemarkings = DeclareLaunchArgument('compute_lanemarkings', default_value='False')
+    compute_bbox = DeclareLaunchArgument('compute_bbox', default_value='False')
+    enable_pid = DeclareLaunchArgument('enable_pid', default_value='False')
+    enable_pure_pursuit = DeclareLaunchArgument('enable_pure_pursuit', default_value='False')
     ld.add_action(host)
     ld.add_action(town)
     ld.add_action(num_vehicles)
@@ -28,6 +32,10 @@ def generate_launch_description():
     ld.add_action(carla_auto_pilot)
     ld.add_action(predict_lane)
     ld.add_action(predict_object)
+    ld.add_action(compute_lanemarkings)
+    ld.add_action(compute_bbox)
+    ld.add_action(enable_pid)
+    ld.add_action(enable_pure_pursuit)
 
     carla_ros_bridge_launch_file = os.path.join(
         get_package_share_directory('carla_ros_bridge'),
@@ -56,6 +64,10 @@ def generate_launch_description():
             {"carla_auto_pilot": LaunchConfiguration('carla_auto_pilot')},
             {"predict_lane": LaunchConfiguration('predict_lane')},
             {"predict_object": LaunchConfiguration('predict_object')},
+            {"compute_lanemarkings": LaunchConfiguration('compute_lanemarkings')},
+            {"compute_bbox": LaunchConfiguration('compute_bbox')},
+            {"enable_pid": LaunchConfiguration('enable_pid')},
+            {"enable_pure_pursuit": LaunchConfiguration('enable_pure_pursuit')},
         ]
     )
     ld.add_action(carla_game_node)

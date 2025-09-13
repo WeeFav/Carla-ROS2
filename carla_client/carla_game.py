@@ -10,7 +10,7 @@ import cv2
 import message_filters
 import threading
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, PointCloud2   
 
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
@@ -27,6 +27,10 @@ class CarlaGame(Node):
         self.carla_auto_pilot = self.declare_parameter("carla_auto_pilot", True).value
         self.predict_lane = self.declare_parameter("predict_lane", False).value
         self.predict_object = self.declare_parameter("predict_object", False).value
+        self.compute_lanemarkings = self.declare_parameter("compute_lanemarkings", False).value
+        self.compute_bbox = self.declare_parameter("compute_bbox", False).value
+        self.enable_pid = self.declare_parameter("enable_pid", False).value
+        self.enable_pure_pursuit = self.declare_parameter("enable_pure_pursuit", False).value
 
         # Fixed parameters
         self.weather = carla.WeatherParameters.ClearNoon
@@ -77,7 +81,7 @@ class CarlaGame(Node):
         self.camera_rgb = self.world.spawn_actor(bp_camera_rgb, self.camera_spawnpoint, attach_to=self.ego_vehicle)
         self.sensors.append(self.camera_rgb)
 
-        if not self.predict_lane:
+        if self.compute_lanemarkings:
             # Spawn semseg-cam and attach to vehicle
             bp_camera_semseg = blueprint_library.find('sensor.camera.semantic_segmentation')
             bp_camera_semseg.set_attribute('image_size_x', f'{self.image_width}')
@@ -86,17 +90,16 @@ class CarlaGame(Node):
             bp_camera_semseg.set_attribute('role_name', 'semseg')
             self.camera_semseg = self.world.spawn_actor(bp_camera_semseg, self.camera_spawnpoint, attach_to=self.ego_vehicle)
             self.sensors.append(self.camera_semseg)
-        else:
-            self.camera_semseg = None
 
-        # Spawn depth-cam and attach to vehicle
-        bp_camera_depth = blueprint_library.find('sensor.camera.depth')
-        bp_camera_depth.set_attribute('image_size_x', f'{self.image_width}')
-        bp_camera_depth.set_attribute('image_size_y', f'{self.image_height}')
-        bp_camera_depth.set_attribute('fov', f'{self.fov}')
-        bp_camera_depth.set_attribute('role_name', 'depth')
-        self.camera_depth = self.world.spawn_actor(bp_camera_depth, self.camera_spawnpoint, attach_to=self.ego_vehicle)
-        self.sensors.append(self.camera_depth)
+        if self.enable_pure_pursuit:
+            # Spawn depth-cam and attach to vehicle
+            bp_camera_depth = blueprint_library.find('sensor.camera.depth')
+            bp_camera_depth.set_attribute('image_size_x', f'{self.image_width}')
+            bp_camera_depth.set_attribute('image_size_y', f'{self.image_height}')
+            bp_camera_depth.set_attribute('fov', f'{self.fov}')
+            bp_camera_depth.set_attribute('role_name', 'depth')
+            self.camera_depth = self.world.spawn_actor(bp_camera_depth, self.camera_spawnpoint, attach_to=self.ego_vehicle)
+            self.sensors.append(self.camera_depth)
 
         # Spawn lidar and attach to vehicle
         bp_lidar = blueprint_library.find("sensor.lidar.ray_cast")
@@ -106,6 +109,7 @@ class CarlaGame(Node):
         bp_lidar.set_attribute("points_per_second", "1300000")
         bp_lidar.set_attribute("upper_fov", "2.0") # +2 up to -24.8 down
         bp_lidar.set_attribute("lower_fov", "-24.8")
+        bp_lidar.set_attribute('role_name', 'lidar')
         self.lidar_spawnpoint = carla.Transform(carla.Location(x=0, y=0, z=1.73))
         self.lidar = self.world.spawn_actor(bp_lidar, self.lidar_spawnpoint, attach_to=self.ego_vehicle)
         self.sensors.append(self.lidar)
@@ -125,24 +129,35 @@ class CarlaGame(Node):
         if self.predict_lane:
             # self.lanedet = LaneDet()
             pass
-        else:
+
+        if self.compute_lanemarkings:
             self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov, self.number_of_lanepoints, self.meters_per_frame)
 
 
         # Subscribers
         # self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
         # self.camera_semseg_sub = self.create_subscription(Image, '/carla/hero/semseg/image', self.camera_semseg_callback, 10)
+
         self.camera_rgb_sub = message_filters.Subscriber(self, Image, '/carla/hero/rgb/image')
-        self.camera_semseg_sub = message_filters.Subscriber(self, Image, '/carla/hero/semseg/image')
-        
+        self.lidar_sub = message_filters.Subscriber(self, PointCloud2, '/carla/hero/lidar')
+        self.synchronizer_subs = [self.camera_rgb_sub, self.lidar_sub]
+
+        if self.compute_lanemarkings:
+            self.camera_semseg_sub = message_filters.Subscriber(self, Image, '/carla/hero/semseg/image')
+            self.synchronizer_subs.append(self.camera_semseg_sub)
+        if self.enable_pure_pursuit:
+            self.camera_depth_sub = message_filters.Subscriber(self, Image, '/carla/hero/depth/image')
+            self.synchronizer_subs.append(self.camera_depth_sub)
+
         self.ts = message_filters.ApproximateTimeSynchronizer(
-            [self.camera_rgb_sub, self.camera_semseg_sub],
+            self.synchronizer_subs,
             queue_size=10,
             slop=0.05   # allowed timestamp difference in seconds
         )
         self.ts.registerCallback(self.sync_callback)
 
         self.sync_done = threading.Event()
+
 
     def reshape_image(self, image):
         array = np.frombuffer(image.data, dtype=np.dtype("uint8"))
@@ -151,45 +166,56 @@ class CarlaGame(Node):
         array = array[:, :, ::-1] # RGB, (H, W, C)
         return array # (H, W, C)
     
+
+    def reshape_pointcloud(self, pointcloud):
+        array = np.frombuffer(pointcloud.data, dtype=np.float32)
+        array = np.reshape(array, (-1, 4)).copy() # x, y, z, r
+        return array # (N, 4) pointcloud
+
     
-    def camera_rgb_callback(self, image):
-        self.image_rgb = self.reshape_image(image)
-
-
-    def camera_semseg_callback(self, image):
-        self.image_semseg = self.reshape_image(image)
-
-
-    def sync_callback(self, image_rgb_msg, image_semseg_msg):
+    def sync_callback(self, *msgs): # msgs is a tuple of whatever came in, in the same order you added to self.synchronizer_subs
         # self.get_logger().info(
         #     f"Got synchronized pair: RGB {image_rgb_msg.header.stamp.sec}.{image_rgb_msg.header.stamp.nanosec}, "
         #     f"Semseg {image_semseg_msg.header.stamp.sec}.{image_semseg_msg.header.stamp.nanosec}"
         # )
+        
+        rgb_msg = msgs[0]
+        self.image_rgb = self.reshape_image(rgb_msg)
+        lidar_msg = msgs[1]
+        self.lidar = self.reshape_pointcloud(lidar_msg)
 
-        self.image_rgb = self.reshape_image(image_rgb_msg)
-        self.image_semseg = self.reshape_image(image_semseg_msg)
+        if self.compute_lanemarkings:
+            semseg_msg = msgs[2]
+            self.image_semseg = self.reshape_image(semseg_msg)
+        if self.enable_pure_pursuit:
+            depth_msg = msgs[3]
+            self.image_depth = self.reshape_image(depth_msg)
+        
+
         self.run()
 
-
         self.sync_done.set()
+
 
     def run(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise KeyboardInterrupt
             
-        ## Get current waypoints ### 
-        waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
-        waypoint_list = []
-        for i in range(0, self.number_of_lanepoints):
-            waypoint_list.append(waypoint.next(i + self.meters_per_frame)[0])
 
         ### Predict lanepoints for all lanes ###
+        lanes_list_processed = None
         if self.predict_lane:
             # img = Image.fromarray(image_rgb, mode="RGB") 
             # lanes_list_processed = self.lanedet.predict(img)
             pass
-        else:
+        if self.compute_lanemarkings:
+            ## Get current waypoints ### 
+            waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
+            waypoint_list = []
+            for i in range(0, self.number_of_lanepoints):
+                waypoint_list.append(waypoint.next(i + self.meters_per_frame)[0])
+
             lanes_list, x_lanes_list = self.lanemarkings.detect_lanemarkings(waypoint_list, self.image_semseg, self.camera_rgb)
             lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
     
@@ -200,18 +226,17 @@ class CarlaGame(Node):
         image_surface = pygame.surfarray.make_surface(self.image_rgb.swapaxes(0, 1)) # (W, H, C)
         self.display.blit(image_surface, (0, 0))
 
-        inst_background = np.zeros_like(self.image_rgb)
-
-        # Draw lane on pygame window and binary mask
-        if(self.render_lanes):
+        if lanes_list_processed:
+            # Draw lane on pygame window and binary mask
+            inst_background = np.zeros_like(self.image_rgb)
             for i in range(len(lanes_list_processed)):
                 for x, y, in lanes_list_processed[i]:
                     pygame.draw.circle(self.display, self.RGB_colors[i], (x, y), 3, 2)
                 cv2.polylines(inst_background, np.int32([lanes_list_processed[i]]), isClosed=False, color=self.BGR_colors[i], thickness=5)                
+            cv2.imshow("inst_background", inst_background)
+            cv2.waitKey(1)
 
         pygame.display.flip()
-        cv2.imshow("inst_background", inst_background)
-        cv2.waitKey(1)
 
 
     def destroy(self):
