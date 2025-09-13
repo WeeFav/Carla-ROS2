@@ -42,7 +42,7 @@ def generate_launch_description():
             'passive': 'True',
         }.items(),
     )
-    # ld.add_action(carla_ros_bridge_launch)
+    ld.add_action(carla_ros_bridge_launch)
 
     carla_game_node = Node(
         package="carla_client",

@@ -7,6 +7,8 @@ import pygame
 import time
 import numpy as np
 import cv2
+import message_filters
+import threading
 
 from sensor_msgs.msg import Image
 
@@ -34,6 +36,7 @@ class CarlaGame(Node):
         self.fov = 90
         self.number_of_lanepoints = 80
         self.meters_per_frame = 1.0
+        self.render_lanes = True
 
         # Set up pygame
         self.display = pygame.display.set_mode((self.image_width, self.image_height), pygame.HWSURFACE | pygame.DOUBLEBUF)
@@ -115,18 +118,31 @@ class CarlaGame(Node):
         self.RGB_colors = [(0, 255, 0), (255, 0, 0), (255, 255, 0), (0, 0, 255)]
         self.BGR_colors = [(0, 255, 0), (0, 0, 255), (0, 255, 255), (255, 0, 0)]
 
+        # Create opencv window
+        cv2.namedWindow("inst_background", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("inst_background", 640, 360)
 
         if self.predict_lane:
             # self.lanedet = LaneDet()
             pass
         else:
-            self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov)
+            self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov, self.number_of_lanepoints, self.meters_per_frame)
 
 
         # Subscribers
-        self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
-        self.camera_semseg_sub = self.create_subscription(Image, '/carla/hero/semseg/image', self.camera_semseg_callback, 10)
+        # self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
+        # self.camera_semseg_sub = self.create_subscription(Image, '/carla/hero/semseg/image', self.camera_semseg_callback, 10)
+        self.camera_rgb_sub = message_filters.Subscriber(self, Image, '/carla/hero/rgb/image')
+        self.camera_semseg_sub = message_filters.Subscriber(self, Image, '/carla/hero/semseg/image')
+        
+        self.ts = message_filters.ApproximateTimeSynchronizer(
+            [self.camera_rgb_sub, self.camera_semseg_sub],
+            queue_size=10,
+            slop=0.05   # allowed timestamp difference in seconds
+        )
+        self.ts.registerCallback(self.sync_callback)
 
+        self.sync_done = threading.Event()
 
     def reshape_image(self, image):
         array = np.frombuffer(image.data, dtype=np.dtype("uint8"))
@@ -144,7 +160,24 @@ class CarlaGame(Node):
         self.image_semseg = self.reshape_image(image)
 
 
+    def sync_callback(self, image_rgb_msg, image_semseg_msg):
+        # self.get_logger().info(
+        #     f"Got synchronized pair: RGB {image_rgb_msg.header.stamp.sec}.{image_rgb_msg.header.stamp.nanosec}, "
+        #     f"Semseg {image_semseg_msg.header.stamp.sec}.{image_semseg_msg.header.stamp.nanosec}"
+        # )
+
+        self.image_rgb = self.reshape_image(image_rgb_msg)
+        self.image_semseg = self.reshape_image(image_semseg_msg)
+        self.run()
+
+
+        self.sync_done.set()
+
     def run(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                raise KeyboardInterrupt
+            
         ## Get current waypoints ### 
         waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
         waypoint_list = []
@@ -159,12 +192,26 @@ class CarlaGame(Node):
         else:
             lanes_list, x_lanes_list = self.lanemarkings.detect_lanemarkings(waypoint_list, self.image_semseg, self.camera_rgb)
             lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
+    
+        self.render(lanes_list_processed)
 
 
-    def render(self):
-        image_surface = pygame.surfarray.make_surface(array.swapaxes(0, 1)) # (W, H, C)
+    def render(self, lanes_list_processed):
+        image_surface = pygame.surfarray.make_surface(self.image_rgb.swapaxes(0, 1)) # (W, H, C)
         self.display.blit(image_surface, (0, 0))
+
+        inst_background = np.zeros_like(self.image_rgb)
+
+        # Draw lane on pygame window and binary mask
+        if(self.render_lanes):
+            for i in range(len(lanes_list_processed)):
+                for x, y, in lanes_list_processed[i]:
+                    pygame.draw.circle(self.display, self.RGB_colors[i], (x, y), 3, 2)
+                cv2.polylines(inst_background, np.int32([lanes_list_processed[i]]), isClosed=False, color=self.BGR_colors[i], thickness=5)                
+
         pygame.display.flip()
+        cv2.imshow("inst_background", inst_background)
+        cv2.waitKey(1)
 
 
     def destroy(self):
@@ -185,24 +232,27 @@ def main():
     pygame.init()
     node = CarlaGame()
 
+    node.get_logger().info('OK')
+
     try:
         # let carla ros setup topic first
         for _ in range(3):
-            node.run()
+            node.world.tick()
 
         while rclpy.ok():
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    raise KeyboardInterrupt
+
+            node.sync_done.clear()
 
             ### Run simulation ###
             node.world.tick()
-            rclpy.spin_once(node, timeout_sec=None) # waits forever for something to happen
-            node.run()
+
+            while not node.sync_done.is_set():
+                rclpy.spin_once(node, timeout_sec=0.1)
 
 
-    except KeyboardInterrupt:
+    except Exception as e:
         node.get_logger().info('Shutting down...')
+        node.get_logger().info(e)
     finally:
         # Clean shutdown
         node.destroy()
