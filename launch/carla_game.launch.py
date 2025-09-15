@@ -12,7 +12,7 @@ import carla
 def generate_launch_description():
     ld = LaunchDescription()
 
-    host = DeclareLaunchArgument('host', default_value='192.168.0.196')
+    host = DeclareLaunchArgument('host', default_value='0.0.0.0')
     town = DeclareLaunchArgument('town', default_value='Town10HD_Opt')
     num_vehicles = DeclareLaunchArgument('num_vehicles', default_value='50')
     auto_run = DeclareLaunchArgument('auto_run', default_value='True')
