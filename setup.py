@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'carla_game = carla_client.carla_game:main',
+            'lanedet = carla_client.lane_detection.lanedet:main',
         ],
     },
 )

@@ -11,16 +11,18 @@ import message_filters
 import threading
 
 from sensor_msgs.msg import Image, PointCloud2   
+from carla_client_msgs.msg import Lanes
 
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
+
 
 class CarlaGame(Node):
     def __init__(self):
         super().__init__('carla_game')
 
         # Get parameters
-        self.host = self.declare_parameter("host", "192.168.0.196").value
+        self.host = self.declare_parameter("host", "0.0.0.0").value
         self.town = self.declare_parameter("town", "Town10HD_Opt").value
         self.num_vehicles = self.declare_parameter("num_vehicles", 50).value
         self.respawn = self.declare_parameter("respawn", 50).value
