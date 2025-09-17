@@ -9,8 +9,9 @@ import numpy as np
 from PIL import Image
 
 from sensor_msgs.msg import Image   
+from carla_client_msgs.msg import Lanes
 
-from model import UFLDNet
+from carla_client.lane_detection.model import UFLDNet
 
 
 class LaneDet(Node):
@@ -67,7 +68,7 @@ class LaneDet(Node):
 
 
         self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
-        self.publisher = self.create_publisher(String, 'topic', 10)
+        self.publisher = self.create_publisher(Lanes, '/lanes', 10)
 
 
     def reshape_image(self, image):
@@ -82,6 +83,14 @@ class LaneDet(Node):
         self.image_rgb = self.reshape_image(msg)
         img = Image.fromarray(self.image_rgb, mode="RGB") 
         lanes_list = self.predict(img)
+
+        lanes_msg = Lanes()
+        lanes_msg.outer_left  = lanes_list[0]
+        lanes_msg.inner_left  = lanes_list[1]
+        lanes_msg.inner_right = lanes_list[2]
+        lanes_msg.outer_right = lanes_list[3]
+
+        self.publisher.publish(lanes_msg)
 
 
     def predict(self, img: Image):

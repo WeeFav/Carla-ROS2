@@ -12,7 +12,7 @@ def generate_launch_description():
 
     pkg_share = get_package_share_directory('carla_client')
 
-    model_path = DeclareLaunchArgument('model_path', default_value=os.path.join(pkg_share, 'models', 'ep049.pth'))
+    model_path = DeclareLaunchArgument('model_path', default_value=os.path.join(pkg_share, 'ep049.pth'))
     use_classification = DeclareLaunchArgument('use_classification', default_value='True')
     ld.add_action(model_path)
     ld.add_action(use_classification)

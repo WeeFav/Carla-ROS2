@@ -15,7 +15,7 @@ from carla_client_msgs.msg import Lanes
 
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
-
+from carla_client.lane_detection.lanedet import LaneDet
 
 class CarlaGame(Node):
     def __init__(self):
@@ -129,17 +129,13 @@ class CarlaGame(Node):
         cv2.resizeWindow("inst_background", 640, 360)
 
         if self.predict_lane:
-            # self.lanedet = LaneDet()
-            pass
+            self.lanedet = LaneDet()
 
         if self.compute_lanemarkings:
             self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov, self.number_of_lanepoints, self.meters_per_frame)
 
 
         # Subscribers
-        # self.camera_rgb_sub = self.create_subscription(Image, '/carla/hero/rgb/image', self.camera_rgb_callback, 10)
-        # self.camera_semseg_sub = self.create_subscription(Image, '/carla/hero/semseg/image', self.camera_semseg_callback, 10)
-
         self.camera_rgb_sub = message_filters.Subscriber(self, Image, '/carla/hero/rgb/image')
         self.lidar_sub = message_filters.Subscriber(self, PointCloud2, '/carla/hero/lidar')
         self.synchronizer_subs = [self.camera_rgb_sub, self.lidar_sub]
@@ -159,6 +155,10 @@ class CarlaGame(Node):
         self.ts.registerCallback(self.sync_callback)
 
         self.sync_done = threading.Event()
+
+        if self.predict_lane:
+            self.pred_sub  = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
+            self.lane_prediction_done = threading.Event()
 
 
     def reshape_image(self, image):
@@ -197,6 +197,16 @@ class CarlaGame(Node):
         self.run()
 
         self.sync_done.set()
+    
+
+    def lanes_prediction_callback(self, msg):
+        lanes_list_processed = [[] for _ in range(4)]
+        lanes_list_processed[0] = msg.outer_left
+        lanes_list_processed[1] = msg.inner_left
+        lanes_list_processed[2] = msg.inner_right
+        lanes_list_processed[3] = msg.outer_right
+        self.lanes_list_processed = lanes_list_processed
+        self.lane_prediction_done.set()
 
 
     def run(self):
@@ -204,13 +214,6 @@ class CarlaGame(Node):
             if event.type == pygame.QUIT:
                 raise KeyboardInterrupt
             
-
-        ### Predict lanepoints for all lanes ###
-        lanes_list_processed = None
-        if self.predict_lane:
-            # img = Image.fromarray(image_rgb, mode="RGB") 
-            # lanes_list_processed = self.lanedet.predict(img)
-            pass
         if self.compute_lanemarkings:
             ## Get current waypoints ### 
             waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
@@ -219,22 +222,26 @@ class CarlaGame(Node):
                 waypoint_list.append(waypoint.next(i + self.meters_per_frame)[0])
 
             lanes_list, x_lanes_list = self.lanemarkings.detect_lanemarkings(waypoint_list, self.image_semseg, self.camera_rgb)
-            lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
+            self.lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
     
-        self.render(lanes_list_processed)
+        
+        if self.predict_lane:
+            self.lane_prediction_done.wait() # Wait for prediction
+        
+        self.render()
 
 
-    def render(self, lanes_list_processed):
+    def render(self):
         image_surface = pygame.surfarray.make_surface(self.image_rgb.swapaxes(0, 1)) # (W, H, C)
         self.display.blit(image_surface, (0, 0))
 
-        if lanes_list_processed:
+        if self.lanes_list_processed:
             # Draw lane on pygame window and binary mask
             inst_background = np.zeros_like(self.image_rgb)
-            for i in range(len(lanes_list_processed)):
-                for x, y, in lanes_list_processed[i]:
+            for i in range(len(self.lanes_list_processed)):
+                for x, y, in self.lanes_list_processed[i]:
                     pygame.draw.circle(self.display, self.RGB_colors[i], (x, y), 3, 2)
-                cv2.polylines(inst_background, np.int32([lanes_list_processed[i]]), isClosed=False, color=self.BGR_colors[i], thickness=5)                
+                cv2.polylines(inst_background, np.int32([self.lanes_list_processed[i]]), isClosed=False, color=self.BGR_colors[i], thickness=5)                
             cv2.imshow("inst_background", inst_background)
             cv2.waitKey(1)
 
@@ -269,6 +276,8 @@ def main():
         while rclpy.ok():
 
             node.sync_done.clear()
+            if node.predict_lane:
+                node.lane_prediction_done.clear()
 
             ### Run simulation ###
             node.world.tick()

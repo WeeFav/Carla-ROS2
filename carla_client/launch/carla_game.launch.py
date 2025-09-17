@@ -5,6 +5,7 @@ from launch_ros.actions import Node
 from launch.actions import IncludeLaunchDescription
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.conditions import IfCondition
 import os
 
 import carla
@@ -71,5 +72,18 @@ def generate_launch_description():
         ]
     )
     ld.add_action(carla_game_node)
+
+    predict_lane_flag = LaunchConfiguration('predict_lane')
+
+    lanedet_launch_file = os.path.join(
+        get_package_share_directory('carla_client'),
+        'lanedet.launch.py'
+    )
+
+    lanedet_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(lanedet_launch_file),
+        condition=IfCondition(predict_lane_flag)
+    )
+    ld.add_action(lanedet_launch)
 
     return ld
