@@ -157,7 +157,7 @@ class CarlaGame(Node):
         self.sync_done = threading.Event()
 
         if self.predict_lane:
-            self.pred_sub  = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
+            self.pred_sub = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
             self.lane_prediction_done = threading.Event()
 
 
@@ -200,16 +200,19 @@ class CarlaGame(Node):
     
 
     def lanes_prediction_callback(self, msg):
+        self.get_logger().info("lanes_prediction_callback")
         lanes_list_processed = [[] for _ in range(4)]
-        lanes_list_processed[0] = msg.outer_left
-        lanes_list_processed[1] = msg.inner_left
-        lanes_list_processed[2] = msg.inner_right
-        lanes_list_processed[3] = msg.outer_right
+        lanes_list_processed[0] = [(int(point.x), int(point.y)) for point in msg.outer_left]
+        lanes_list_processed[1] = [(int(point.x), int(point.y)) for point in msg.inner_left]
+        lanes_list_processed[2] = [(int(point.x), int(point.y)) for point in msg.inner_right]
+        lanes_list_processed[3] = [(int(point.x), int(point.y)) for point in msg.outer_right]
         self.lanes_list_processed = lanes_list_processed
         self.lane_prediction_done.set()
 
 
     def run(self):
+        self.get_logger().info("run")
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 raise KeyboardInterrupt
@@ -226,7 +229,8 @@ class CarlaGame(Node):
     
         
         if self.predict_lane:
-            self.lane_prediction_done.wait() # Wait for prediction
+            while not self.lane_prediction_done.is_set():
+                self.lane_prediction_done.wait(timeout=0.1) # Wait for prediction
         
         self.render()
 
@@ -266,14 +270,14 @@ def main():
     pygame.init()
     node = CarlaGame()
 
-    node.get_logger().info('OK')
-
     try:
         # let carla ros setup topic first
         for _ in range(3):
             node.world.tick()
 
         while rclpy.ok():
+            node.get_logger().info('OK')
+
 
             node.sync_done.clear()
             if node.predict_lane:

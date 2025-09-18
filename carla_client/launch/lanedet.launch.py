@@ -10,20 +10,11 @@ import os
 def generate_launch_description():
     ld = LaunchDescription()
 
-    pkg_share = get_package_share_directory('carla_client')
-
-    model_path = DeclareLaunchArgument('model_path', default_value=os.path.join(pkg_share, 'ep049.pth'))
-    use_classification = DeclareLaunchArgument('use_classification', default_value='True')
-    ld.add_action(model_path)
-    ld.add_action(use_classification)
-
     lanedet_node = Node(
         package="carla_client",
         executable="lanedet",
-        parameters=[
-            {"model_path": LaunchConfiguration('model_path')},
-            {"use_classification": LaunchConfiguration('use_classification')},
-        ]
+        output='screen',
+        emulate_tty=True,
     )
     ld.add_action(lanedet_node)
 

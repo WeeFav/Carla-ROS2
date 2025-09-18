@@ -69,7 +69,9 @@ def generate_launch_description():
             {"compute_bbox": LaunchConfiguration('compute_bbox')},
             {"enable_pid": LaunchConfiguration('enable_pid')},
             {"enable_pure_pursuit": LaunchConfiguration('enable_pure_pursuit')},
-        ]
+        ],
+        output='screen',
+        emulate_tty=True,
     )
     ld.add_action(carla_game_node)
 

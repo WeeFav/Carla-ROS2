@@ -1,4 +1,4 @@
-int32[] outer_left
-int32[] inner_left
-int32[] inner_right
-int32[] outer_right
+geometry_msgs/Point32[] outer_left
+geometry_msgs/Point32[] inner_left
+geometry_msgs/Point32[] inner_right
+geometry_msgs/Point32[] outer_right

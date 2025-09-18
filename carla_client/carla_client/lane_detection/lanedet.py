@@ -6,10 +6,11 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
 import scipy.special
 import numpy as np
-from PIL import Image
+import PIL
 
 from sensor_msgs.msg import Image   
 from carla_client_msgs.msg import Lanes
+from geometry_msgs.msg import Point32
 
 from carla_client.lane_detection.model import UFLDNet
 
@@ -19,8 +20,6 @@ class LaneDet(Node):
         super().__init__('lanedet')
 
         # Get parameters
-        self.model_path = self.declare_parameter("model_path", "").value
-        self.use_classification = self.declare_parameter("use_classification", True).value
 
         # Fixed parameters
         self.img_w = 1280
@@ -35,6 +34,8 @@ class LaneDet(Node):
             168, 172, 176, 180, 184, 188, 192, 196, 200, 204, 208, 212, 216,
             220, 224, 228, 232, 236, 240, 244, 248, 252, 256, 260, 264, 268,
             272, 276, 280, 284]
+        self.model_path = "/home/marvi/ros2_ws/src/carla_client/models/ep049.pth"
+        self.use_classification = True
         
 
         self.model = UFLDNet(
@@ -79,18 +80,33 @@ class LaneDet(Node):
         return array # (H, W, C)
     
 
+    def tuple_list_to_points(self, lane):
+        points = []
+        for x, y in lane:
+            p = Point32()
+            p.x = float(x)
+            p.y = float(y)
+            p.z = 0.0   # or use real z if you have it
+            points.append(p)
+        return points
+
+
     def camera_rgb_callback(self, msg):
+        self.get_logger().info("got image")
         self.image_rgb = self.reshape_image(msg)
-        img = Image.fromarray(self.image_rgb, mode="RGB") 
+        img = PIL.Image.fromarray(self.image_rgb, mode="RGB") 
         lanes_list = self.predict(img)
 
         lanes_msg = Lanes()
-        lanes_msg.outer_left  = lanes_list[0]
-        lanes_msg.inner_left  = lanes_list[1]
-        lanes_msg.inner_right = lanes_list[2]
-        lanes_msg.outer_right = lanes_list[3]
+        
+        lanes_msg.outer_left  = self.tuple_list_to_points(lanes_list[0])
+        lanes_msg.inner_left  = self.tuple_list_to_points(lanes_list[1])
+        lanes_msg.inner_right = self.tuple_list_to_points(lanes_list[2])
+        lanes_msg.outer_right = self.tuple_list_to_points(lanes_list[3])
 
+        
         self.publisher.publish(lanes_msg)
+        self.get_logger().info("publish")
 
 
     def predict(self, img: Image):
