@@ -9,6 +9,8 @@ import numpy as np
 import cv2
 import message_filters
 import threading
+import open3d as o3d
+import traceback
 
 from sensor_msgs.msg import Image, PointCloud2   
 from carla_client_msgs.msg import Lanes
@@ -16,6 +18,7 @@ from carla_client_msgs.msg import Lanes
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
 from carla_client.lane_detection.lanedet import LaneDet
+from carla_client.lidar_object_detection import get_bboxes, bbox3d2corners
 
 class CarlaGame(Node):
     def __init__(self):
@@ -128,6 +131,36 @@ class CarlaGame(Node):
         cv2.namedWindow("inst_background", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("inst_background", 640, 360)
 
+        # Initialize Open3D Visualizer
+        self.vis = o3d.visualization.Visualizer()
+        self.vis.create_window(window_name='CARLA LiDAR', width=800, height=600)
+        self.pcd = o3d.geometry.PointCloud()
+        self.pcd.points = o3d.utility.Vector3dVector(np.random.rand(10, 3))
+        self.vis.add_geometry(self.pcd)
+        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=5, origin=[0, 0, 0])
+        self.vis.add_geometry(mesh_frame)
+
+        render_opt = self.vis.get_render_option()
+        render_opt.background_color = np.asarray([0, 0, 0])
+        render_opt.point_size = 1
+        
+        ctr = self.vis.get_view_control()
+        ctr.change_field_of_view(step=90)
+        ctr.set_constant_z_far(2000)
+        ctr.set_constant_z_near(0.1)
+        self.vis.reset_view_point(True)
+        self.cam = ctr.convert_to_pinhole_camera_parameters()
+
+        self.bbox_lines = []
+
+        # Define line connections between the 8 corners
+        self.lines = [
+            [0, 1], [1, 2], [2, 3], [3, 0],  # bottom rectangle
+            [4, 5], [5, 6], [6, 7], [7, 4],  # top rectangle
+            [0, 4], [1, 5], [2, 6], [3, 7]   # vertical edges
+        ]
+
+
         if self.predict_lane:
             self.lanedet = LaneDet()
 
@@ -156,9 +189,12 @@ class CarlaGame(Node):
 
         self.sync_done = threading.Event()
 
+        self.modules_event = []
+
         if self.predict_lane:
             self.pred_sub = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
             self.lane_prediction_done = threading.Event()
+            self.modules_event.append(self.lane_prediction_done)
 
 
     def reshape_image(self, image):
@@ -184,7 +220,8 @@ class CarlaGame(Node):
         rgb_msg = msgs[0]
         self.image_rgb = self.reshape_image(rgb_msg)
         lidar_msg = msgs[1]
-        self.lidar = self.reshape_pointcloud(lidar_msg)
+        pointcloud = self.reshape_pointcloud(lidar_msg)
+        self.pointcloud = pointcloud[:, :3]
 
         if self.compute_lanemarkings:
             semseg_msg = msgs[2]
@@ -193,14 +230,11 @@ class CarlaGame(Node):
             depth_msg = msgs[3]
             self.image_depth = self.reshape_image(depth_msg)
         
-
-        self.run()
-
+        self.process_sensors()
         self.sync_done.set()
     
 
     def lanes_prediction_callback(self, msg):
-        self.get_logger().info("lanes_prediction_callback")
         lanes_list_processed = [[] for _ in range(4)]
         lanes_list_processed[0] = [(int(point.x), int(point.y)) for point in msg.outer_left]
         lanes_list_processed[1] = [(int(point.x), int(point.y)) for point in msg.inner_left]
@@ -210,13 +244,10 @@ class CarlaGame(Node):
         self.lane_prediction_done.set()
 
 
-    def run(self):
-        self.get_logger().info("run")
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                raise KeyboardInterrupt
-            
+    def process_sensors(self):
+        self.lanes_list_processed = []
+        self.lidar_bboxes = []
+        
         if self.compute_lanemarkings:
             ## Get current waypoints ### 
             waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
@@ -226,11 +257,13 @@ class CarlaGame(Node):
 
             lanes_list, x_lanes_list = self.lanemarkings.detect_lanemarkings(waypoint_list, self.image_semseg, self.camera_rgb)
             self.lanes_list_processed = self.lanemarkings.lanemarkings_processed(lanes_list)
-    
-        
-        if self.predict_lane:
-            while not self.lane_prediction_done.is_set():
-                self.lane_prediction_done.wait(timeout=0.1) # Wait for prediction
+
+        if self.compute_bbox:
+            lidar_bboxes, labels = get_bboxes(self.world, self.pointcloud, self.lidar)
+            self.lidar_bboxes = lidar_bboxes
+
+
+    def run(self):
         
         self.render()
 
@@ -248,6 +281,41 @@ class CarlaGame(Node):
                 cv2.polylines(inst_background, np.int32([self.lanes_list_processed[i]]), isClosed=False, color=self.BGR_colors[i], thickness=5)                
             cv2.imshow("inst_background", inst_background)
             cv2.waitKey(1)
+
+
+        # # Update point cloud
+        # self.pcd.points = o3d.utility.Vector3dVector(self.pointcloud)
+        # self.pcd.colors = o3d.utility.Vector3dVector(np.tile([1.0, 1.0, 0.0], (self.pointcloud.shape[0], 1)))
+        # self.vis.update_geometry(self.pcd)
+
+        # # Clear previous bounding boxes
+        # for line in self.bbox_lines:
+        #     self.vis.remove_geometry(line, reset_bounding_box=False)
+        # self.bbox_lines = []
+
+        # bboxes_corners = bbox3d2corners(self.lidar_bboxes)
+        # for corners in bboxes_corners:
+        #     # Apply transformation to Open3D coordinate frame
+        #     corners[:, 1] = -corners[:, 1] # convert from UE to Kitti/Open3D
+
+        #     # Create LineSet
+        #     line_set = o3d.geometry.LineSet()
+        #     line_set.points = o3d.utility.Vector3dVector(corners)
+        #     line_set.lines = o3d.utility.Vector2iVector(self.lines)
+
+        #     # Set green color for all lines
+        #     colors = [[0.0, 1.0, 0.0] for _ in range(len(self.lines))]
+        #     line_set.colors = o3d.utility.Vector3dVector(colors)
+
+        #     # Add to visualizer and keep reference
+        #     self.vis.add_geometry(line_set)
+        #     self.bbox_lines.append(line_set)
+
+        # self.vis.get_view_control().convert_from_pinhole_camera_parameters(self.cam)
+        # self.vis.poll_events()
+        # self.vis.update_renderer()
+        # self.cam = self.vis.get_view_control().convert_to_pinhole_camera_parameters()
+
 
         pygame.display.flip()
 
@@ -276,23 +344,34 @@ def main():
             node.world.tick()
 
         while rclpy.ok():
-            node.get_logger().info('OK')
-
-
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    raise KeyboardInterrupt
+                
             node.sync_done.clear()
-            if node.predict_lane:
-                node.lane_prediction_done.clear()
+            for event in node.modules_event:
+                event.clear()
 
             ### Run simulation ###
             node.world.tick()
 
+            # wait for sensor data
             while not node.sync_done.is_set():
                 rclpy.spin_once(node, timeout_sec=0.1)
+
+            node.process_sensors()
+
+            # wait for other modules
+            for event in node.modules_event:
+                while not event.is_set():
+                    rclpy.spin_once(node, timeout_sec=0.1)
+                
+            node.run()
 
 
     except Exception as e:
         node.get_logger().info('Shutting down...')
-        node.get_logger().info(e)
+        traceback.print_exc()
     finally:
         # Clean shutdown
         node.destroy()

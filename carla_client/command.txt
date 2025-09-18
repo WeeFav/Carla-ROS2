@@ -1,7 +1,6 @@
-cd ~/ros2_ws
-colcon build --packages-select carla_client
+colcon build --packages-select carla_client carla_client_msgs
 source ~/.bashrc
+ros2 launch carla_client carla_game.launch.py host:=
 
 ./CarlaUE4.exe -carla-server -windowed -ResX=480 -ResY=320 -quality-level=Low -benchmark -fps=10 -carla-port=2000
 
-ros2 launch carla_client carla_game.launch.py host:=

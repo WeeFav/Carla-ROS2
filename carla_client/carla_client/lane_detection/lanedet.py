@@ -92,7 +92,6 @@ class LaneDet(Node):
 
 
     def camera_rgb_callback(self, msg):
-        self.get_logger().info("got image")
         self.image_rgb = self.reshape_image(msg)
         img = PIL.Image.fromarray(self.image_rgb, mode="RGB") 
         lanes_list = self.predict(img)
@@ -106,7 +105,6 @@ class LaneDet(Node):
 
         
         self.publisher.publish(lanes_msg)
-        self.get_logger().info("publish")
 
 
     def predict(self, img: Image):
