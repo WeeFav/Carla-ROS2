@@ -1,0 +1,1 @@
+model_path = "object_detection/epoch_160.pth"

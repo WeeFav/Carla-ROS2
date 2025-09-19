@@ -17,7 +17,6 @@ from carla_client_msgs.msg import Lanes
 
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
-from carla_client.lane_detection.lanedet import LaneDet
 from carla_client.lidar_object_detection import get_bboxes, bbox3d2corners
 
 class CarlaGame(Node):
@@ -160,9 +159,6 @@ class CarlaGame(Node):
             [0, 4], [1, 5], [2, 6], [3, 7]   # vertical edges
         ]
 
-
-        if self.predict_lane:
-            self.lanedet = LaneDet()
 
         if self.compute_lanemarkings:
             self.lanemarkings = LaneMarkings(self.world, self.image_width, self.image_height, self.fov, self.number_of_lanepoints, self.meters_per_frame)
