@@ -38,6 +38,7 @@ def generate_launch_description():
     ld.add_action(enable_pid)
     ld.add_action(enable_pure_pursuit)
 
+    # carla ros bridge
     carla_ros_bridge_launch_file = os.path.join(
         get_package_share_directory('carla_ros_bridge'),
         'carla_ros_bridge.launch.py'
@@ -53,6 +54,7 @@ def generate_launch_description():
     )
     ld.add_action(carla_ros_bridge_launch)
 
+    # carla game
     carla_game_node = Node(
         package="carla_client",
         executable="carla_game",
@@ -75,8 +77,8 @@ def generate_launch_description():
     )
     ld.add_action(carla_game_node)
 
+    # lanedet
     predict_lane_flag = LaunchConfiguration('predict_lane')
-
     lanedet_launch_file = os.path.join(
         get_package_share_directory('carla_client'),
         'lanedet.launch.py'
@@ -87,5 +89,18 @@ def generate_launch_description():
         condition=IfCondition(predict_lane_flag)
     )
     ld.add_action(lanedet_launch)
+
+    # objectdet
+    predict_object_flag = LaunchConfiguration('predict_object')
+    objectdet_launch_file = os.path.join(
+        get_package_share_directory('carla_client'),
+        'objectdet.launch.py'
+    )
+
+    objectdet_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(objectdet_launch_file),
+        condition=IfCondition(predict_object_flag)
+    )
+    ld.add_action(objectdet_launch)
 
     return ld

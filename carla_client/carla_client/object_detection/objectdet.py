@@ -5,13 +5,14 @@ import numpy as np
 import torch
 
 from sensor_msgs.msg import PointCloud2   
+from carla_client_msgs.msg import ObjBBox, ObjBBoxArray
 
 from carla_client.object_detection.pointpillars.model.pointpillars import PointPillars
 
 
 class ObjDet(Node):
     def __init__(self):
-        super().__init__('lanedet')
+        super().__init__('objectdet')
 
         # Fixed parameters
         self.model_path = "/home/marvi/ros2_ws/src/carla_client/models/epoch_160.pth"
@@ -30,7 +31,7 @@ class ObjDet(Node):
 
 
         self.lidar_sub = self.create_subscription(PointCloud2, '/carla/hero/lidar', self.lidar_callback, 10)
-        self.publisher = self.create_publisher(Lanes, '/lanes', 10)
+        self.publisher = self.create_publisher(ObjBBoxArray, '/bboxes', 10)
 
     
     def reshape_pointcloud(self, pointcloud):
@@ -41,9 +42,23 @@ class ObjDet(Node):
 
     def lidar_callback(self, msgs):
         lidar_msg = msgs
-        pointcloud = self.reshape_pointcloud(lidar_msg)[:, :3]
+        pointcloud = self.reshape_pointcloud(lidar_msg)
         lidar_bboxes, labels = self.predict(pointcloud)
         
+        bboxes = ObjBBoxArray()
+        for lidar_bbox, label in zip(lidar_bboxes, labels):
+            bbox = ObjBBox()
+            bbox.x = lidar_bbox[0].item()
+            bbox.y = lidar_bbox[1].item()
+            bbox.z = lidar_bbox[2].item()
+            bbox.h = lidar_bbox[3].item()
+            bbox.w = lidar_bbox[4].item()
+            bbox.l = lidar_bbox[5].item()
+            bbox.yaw = lidar_bbox[6].item()
+            bbox.label = label.item()
+            bboxes.bboxes.append(bbox)
+        
+        self.publisher.publish(bboxes)
 
 
     def point_range_filter(self, pts, point_range=[-70.4, -40.0, -3, 70.4, 40.0, 1]):
@@ -110,3 +125,17 @@ class ObjDet(Node):
             labels = []
 
         return lidar_bboxes, labels
+    
+
+def main():
+    rclpy.init()
+    node = ObjDet()
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

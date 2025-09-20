@@ -13,7 +13,7 @@ import open3d as o3d
 import traceback
 
 from sensor_msgs.msg import Image, PointCloud2   
-from carla_client_msgs.msg import Lanes
+from carla_client_msgs.msg import Lanes, ObjBBoxArray
 
 from carla_client.vehicle_manager import VehicleManager
 from carla_client.lanemarkings import LaneMarkings
@@ -188,9 +188,13 @@ class CarlaGame(Node):
         self.modules_event = []
 
         if self.predict_lane:
-            self.pred_sub = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
+            self.lanes_sub = self.create_subscription(Lanes, '/lanes', self.lanes_prediction_callback, 10)
             self.lane_prediction_done = threading.Event()
             self.modules_event.append(self.lane_prediction_done)
+        if self.predict_object:
+            self.bboxes_sub = self.create_subscription(ObjBBoxArray, '/bboxes', self.obj_prediction_callback, 10)
+            self.obj_prediction_done = threading.Event()
+            self.modules_event.append(self.obj_prediction_done)
 
 
     def reshape_image(self, image):
@@ -240,6 +244,23 @@ class CarlaGame(Node):
         self.lane_prediction_done.set()
 
 
+    def obj_prediction_callback(self, msg):
+        lidar_bboxes = []
+        for bbox in msg.bboxes:
+            lidar_bbox = [0] * 7
+            lidar_bbox[0] = bbox.x
+            lidar_bbox[1] = bbox.y
+            lidar_bbox[2] = bbox.z
+            lidar_bbox[3] = bbox.h
+            lidar_bbox[4] = bbox.w
+            lidar_bbox[5] = bbox.l
+            lidar_bbox[6] = bbox.yaw
+            lidar_bboxes.append(lidar_bbox)
+        self.lidar_bboxes = np.array(lidar_bboxes)
+        print(len(self.lidar_bboxes))
+        self.obj_prediction_done.set()
+
+
     def process_sensors(self):
         self.lanes_list_processed = []
         self.lidar_bboxes = []
@@ -279,38 +300,38 @@ class CarlaGame(Node):
             cv2.waitKey(1)
 
 
-        # # Update point cloud
-        # self.pcd.points = o3d.utility.Vector3dVector(self.pointcloud)
-        # self.pcd.colors = o3d.utility.Vector3dVector(np.tile([1.0, 1.0, 0.0], (self.pointcloud.shape[0], 1)))
-        # self.vis.update_geometry(self.pcd)
+        # Update point cloud
+        self.pcd.points = o3d.utility.Vector3dVector(self.pointcloud)
+        self.pcd.colors = o3d.utility.Vector3dVector(np.tile([1.0, 1.0, 0.0], (self.pointcloud.shape[0], 1)))
+        self.vis.update_geometry(self.pcd)
 
-        # # Clear previous bounding boxes
-        # for line in self.bbox_lines:
-        #     self.vis.remove_geometry(line, reset_bounding_box=False)
-        # self.bbox_lines = []
+        # Clear previous bounding boxes
+        for line in self.bbox_lines:
+            self.vis.remove_geometry(line, reset_bounding_box=False)
+        self.bbox_lines = []
 
-        # bboxes_corners = bbox3d2corners(self.lidar_bboxes)
-        # for corners in bboxes_corners:
-        #     # Apply transformation to Open3D coordinate frame
-        #     corners[:, 1] = -corners[:, 1] # convert from UE to Kitti/Open3D
+        bboxes_corners = bbox3d2corners(self.lidar_bboxes)
+        for corners in bboxes_corners:
+            # Apply transformation to Open3D coordinate frame
+            corners[:, 1] = -corners[:, 1] # convert from UE to Kitti/Open3D
 
-        #     # Create LineSet
-        #     line_set = o3d.geometry.LineSet()
-        #     line_set.points = o3d.utility.Vector3dVector(corners)
-        #     line_set.lines = o3d.utility.Vector2iVector(self.lines)
+            # Create LineSet
+            line_set = o3d.geometry.LineSet()
+            line_set.points = o3d.utility.Vector3dVector(corners)
+            line_set.lines = o3d.utility.Vector2iVector(self.lines)
 
-        #     # Set green color for all lines
-        #     colors = [[0.0, 1.0, 0.0] for _ in range(len(self.lines))]
-        #     line_set.colors = o3d.utility.Vector3dVector(colors)
+            # Set green color for all lines
+            colors = [[0.0, 1.0, 0.0] for _ in range(len(self.lines))]
+            line_set.colors = o3d.utility.Vector3dVector(colors)
 
-        #     # Add to visualizer and keep reference
-        #     self.vis.add_geometry(line_set)
-        #     self.bbox_lines.append(line_set)
+            # Add to visualizer and keep reference
+            self.vis.add_geometry(line_set)
+            self.bbox_lines.append(line_set)
 
-        # self.vis.get_view_control().convert_from_pinhole_camera_parameters(self.cam)
-        # self.vis.poll_events()
-        # self.vis.update_renderer()
-        # self.cam = self.vis.get_view_control().convert_to_pinhole_camera_parameters()
+        self.vis.get_view_control().convert_from_pinhole_camera_parameters(self.cam)
+        self.vis.poll_events()
+        self.vis.update_renderer()
+        self.cam = self.vis.get_view_control().convert_to_pinhole_camera_parameters()
 
 
         pygame.display.flip()
@@ -328,6 +349,7 @@ class CarlaGame(Node):
         settings.fixed_delta_seconds = None
         self.world.apply_settings(settings)
         self.get_logger().info('Synchronous mode disabled and actors destroyed.')
+
 
 def main():
     rclpy.init()

@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'carla_game = carla_client.carla_game:main',
             'lanedet = carla_client.lane_detection.lanedet:main',
+            'objectdet = carla_client.object_detection.objectdet:main',
         ],
     },
 )

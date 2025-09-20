@@ -96,15 +96,13 @@ class LaneDet(Node):
         img = PIL.Image.fromarray(self.image_rgb, mode="RGB") 
         lanes_list = self.predict(img)
 
-        lanes_msg = Lanes()
-        
-        lanes_msg.outer_left  = self.tuple_list_to_points(lanes_list[0])
-        lanes_msg.inner_left  = self.tuple_list_to_points(lanes_list[1])
-        lanes_msg.inner_right = self.tuple_list_to_points(lanes_list[2])
-        lanes_msg.outer_right = self.tuple_list_to_points(lanes_list[3])
+        lanes = Lanes()
+        lanes.outer_left  = self.tuple_list_to_points(lanes_list[0])
+        lanes.inner_left  = self.tuple_list_to_points(lanes_list[1])
+        lanes.inner_right = self.tuple_list_to_points(lanes_list[2])
+        lanes.outer_right = self.tuple_list_to_points(lanes_list[3])
 
-        
-        self.publisher.publish(lanes_msg)
+        self.publisher.publish(lanes)
 
 
     def predict(self, img: Image):
