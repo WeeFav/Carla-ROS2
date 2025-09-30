@@ -327,7 +327,7 @@ void PCLLocalization::initialPoseReceived(const geometry_msgs::msg::PoseWithCova
   corrent_pose_with_cov_stamped_ptr_ = msg;
   pose_pub_->publish(*corrent_pose_with_cov_stamped_ptr_);
 
-  cloudReceived(last_scan_ptr_);
+  // cloudReceived(last_scan_ptr_);
   RCLCPP_INFO(get_logger(), "initialPoseReceived end");
 }
 
@@ -446,7 +446,6 @@ void PCLLocalization::imuReceived(const sensor_msgs::msg::Imu::ConstSharedPtr ms
     msg->header.stamp.nanosec * 1e-9;
 
   lidar_undistortion_.getImu(angular_velo, acc, quat, imu_time);
-  std::cout << "lidar_undistortion_ success" << std::endl;
 
 }
 

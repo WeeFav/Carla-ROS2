@@ -1,0 +1,4 @@
+colcon build --packages-select lidar_localization_ros2
+ros2 launch lidar_localization_ros2 lidar_localization.launch.py
+ros2 bag play bags/walking_dataset --remap /points_raw:=/velodyne_points imu_raw:=/imu
+rviz2 -d src/lidar_localization_ros2/rviz/localization.rviz
