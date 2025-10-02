@@ -31,7 +31,7 @@ def generate_launch_description():
         name='imu_tf',
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments=['0','0','0','0','3.14159','0','base_link','imu_link']
+        arguments=['0.0', '0.0', '0.0', '0.0', '1.0', '0.0', '0.0','base_link','imu_link']
         )
 
     localization_param_dir = launch.substitutions.LaunchConfiguration(
